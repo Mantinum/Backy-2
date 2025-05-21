@@ -1,0 +1,7 @@
+[workspace]
+resolver = "3"
+members = [
+    "backy_core",
+    "backy_gui",
+    "backy_gui/src-tauri",
+]

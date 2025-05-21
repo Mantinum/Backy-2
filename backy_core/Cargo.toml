@@ -1,0 +1,20 @@
+[package]
+name = "backy_core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fastcdc = "3"
+serde_json = "1.0"
+aes-gcm = "0.10"
+argon2 = "0.4"
+rand = "0.8"
+password-hash = "0.4"
+anyhow = "1.0"
+uuid = { version = "1.4", features = ["v4", "serde"] }
+directories = "4.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.3"
