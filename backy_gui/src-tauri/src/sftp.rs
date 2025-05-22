@@ -131,7 +131,7 @@ impl SftpClient {
 
         let filenames = entries
             .into_iter()
-            .map(|(entry_path, _stat)| {
+            .map(|(entry_path, _stat): (PathBuf, ssh2::FileStat)| {
                 entry_path
                     .file_name()
                     .unwrap_or_default() // Use OsStr::new("") if file_name is None
