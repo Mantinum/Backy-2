@@ -3,7 +3,7 @@
 
 use tauri_plugin_dialog::DialogExt;
 use backy_core::{backup_start, chunk_file, init_repo, save_blob, list_blobs, save_blob_local};
-use std::path::{Path, PathBuf}; // Added PathBuf for path manipulation
+use std::path::Path; // Removed PathBuf as it's unused
 use serde::Deserialize;
 use log::{info, error}; // Added for logging
 
