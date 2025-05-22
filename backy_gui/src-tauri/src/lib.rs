@@ -3,8 +3,9 @@
 
 use tauri_plugin_dialog::DialogExt;
 use backy_core::{backup_start, chunk_file, init_repo, save_blob, list_blobs, save_blob_local};
-use std::path::Path;
-use serde::Deserialize;  // Ajout de l'import pour les macros de serde
+use std::path::{Path, PathBuf}; // Added PathBuf for path manipulation
+use serde::Deserialize;
+use log::{info, error}; // Added for logging
 
 mod sftp;
 use sftp::SftpClient;
@@ -119,31 +120,109 @@ struct SftpBackupArgs {
 
 #[tauri::command]
 fn sftp_backup(args: SftpBackupArgs) -> Result<String, String> {
-  log::info!("Tentative de connexion SFTP à {}:{}", args.host, args.port);
+  info!("SFTP Backup: Attempting SFTP connection to {}:{}", args.host, args.port);
   
   let client = SftpClient::new(&args.host, args.port, &args.username, &args.password)
       .map_err(|e| {
-          log::error!("Échec de la connexion SFTP : {}", e);
+          error!("SFTP Backup: Connection failed: {}", e);
           e.to_string()
       })?;
   
-  log::info!("Création du répertoire distant : {}", args.remote_path);
+  info!("SFTP Backup: Ensuring remote directory exists: {}", args.remote_path);
   client.create_directory(&args.remote_path)
       .map_err(|e| {
-          log::error!("Échec de la création du répertoire : {}", e);
+          error!("SFTP Backup: Failed to create remote directory '{}': {}", args.remote_path, e);
           e.to_string()
       })?;
   
-  log::info!("Upload du fichier {} vers {}", args.local_path, args.remote_path);
-  client.upload_file(Path::new(&args.local_path), &args.remote_path)
+  let local_path = Path::new(&args.local_path);
+  let file_name = local_path.file_name().ok_or_else(|| {
+      let err_msg = format!("SFTP Backup: Invalid local path, could not extract filename: {}", args.local_path);
+      error!("{}", err_msg);
+      err_msg
+  })?.to_str().ok_or_else(|| {
+      let err_msg = format!("SFTP Backup: Filename from local path is not valid UTF-8: {}", args.local_path);
+      error!("{}", err_msg);
+      err_msg
+  })?;
+
+  let actual_remote_target_path = Path::new(&args.remote_path).join(file_name);
+  let actual_remote_target_path_str = actual_remote_target_path.to_str().ok_or_else(|| {
+    let err_msg = format!("SFTP Backup: Constructed remote path is not valid UTF-8: {}", actual_remote_target_path.display());
+    error!("{}", err_msg);
+    err_msg
+  })?;
+
+  info!("SFTP Backup: Uploading file {} to {}", args.local_path, actual_remote_target_path_str);
+  client.upload_file(local_path, actual_remote_target_path_str)
       .map_err(|e| {
-          log::error!("Échec de l'upload du fichier : {}", e);
+          error!("SFTP Backup: File upload failed for '{}' to '{}': {}", args.local_path, actual_remote_target_path_str, e);
           e.to_string()
       })?;
   
-  log::info!("Sauvegarde SFTP réussie");
-  Ok("Sauvegarde SFTP réussie".to_string())
+  info!("SFTP Backup: Backup successful for {}", args.local_path);
+  Ok(format!("File '{}' backed up successfully to '{}'", file_name, args.remote_path))
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpListDirectoryArgs {
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    remote_path: String,
+}
+
+#[tauri::command]
+fn sftp_list_directory(args: SftpListDirectoryArgs) -> Result<Vec<String>, String> {
+    info!("SFTP List Directory: Attempting connection to {}:{} for path '{}'", args.host, args.port, args.remote_path);
+    let client = SftpClient::new(&args.host, args.port, &args.username, &args.password)
+        .map_err(|e| {
+            error!("SFTP List Directory: Connection failed for {}:{}: {}", args.host, args.port, e);
+            e.to_string()
+        })?;
+    
+    let entries = client.list_directory(&args.remote_path)
+        .map_err(|e| {
+            error!("SFTP List Directory: Failed to list directory '{}': {}", args.remote_path, e);
+            e.to_string()
+        })?;
+    
+    info!("SFTP List Directory: Successfully listed directory '{}'", args.remote_path);
+    Ok(entries)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpDownloadFileArgs {
+    host: String,
+    port: u16,
+    username: String,
+    password: String,
+    remote_path: String,
+    local_path: String,
+}
+
+#[tauri::command]
+fn sftp_download_file(args: SftpDownloadFileArgs) -> Result<String, String> {
+    info!("SFTP Download File: Attempting to download '{}' from {}:{} to '{}'", args.remote_path, args.host, args.port, args.local_path);
+    let client = SftpClient::new(&args.host, args.port, &args.username, &args.password)
+        .map_err(|e| {
+            error!("SFTP Download File: Connection failed for {}:{}: {}", args.host, args.port, e);
+            e.to_string()
+        })?;
+
+    client.download_file(&args.remote_path, Path::new(&args.local_path))
+        .map_err(|e| {
+            error!("SFTP Download File: Failed to download '{}' to '{}': {}", args.remote_path, args.local_path, e);
+            e.to_string()
+        })?;
+
+    info!("SFTP Download File: Successfully downloaded '{}' to '{}'", args.remote_path, args.local_path);
+    Ok("File downloaded successfully".to_string())
+}
+
 
 pub fn run() {
   tauri::Builder::default()
@@ -156,11 +235,13 @@ pub fn run() {
       save_blob_local_cmd,
       open_file_dialog,
       open_directory_dialog,
-      sftp_backup
+      sftp_backup,
+      sftp_list_directory,
+      sftp_download_file
     ])
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_log::Builder::default()
-      .level(log::LevelFilter::Info)
+      .level(log::LevelFilter::Info) // Ensure log level is set
       .build())
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
