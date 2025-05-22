@@ -1,7 +1,16 @@
-target/
-Cargo.lock
-.DS_Store
-node_modules/
-dist/
+# .gitignore
 
-target/
+# Ignore Cargo build artifacts
+/target/
+
+# Ignore Cargo lock file
+/Cargo.lock
+
+# Ignore Node.js dependencies
+**/node_modules/
+
+# Ignore log files
+*.log
+
+# Ignore environment files
+.env

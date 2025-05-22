@@ -3,6 +3,11 @@
 
 use tauri_plugin_dialog::DialogExt;
 use backy_core::{backup_start, chunk_file, init_repo, save_blob, list_blobs, save_blob_local};
+use std::path::Path;
+use serde::Deserialize;  // Ajout de l'import pour les macros de serde
+
+mod sftp;
+use sftp::SftpClient;
 
 #[tauri::command]
 fn backup_start_cmd(source: String) -> Result<String, String> {
@@ -38,7 +43,6 @@ fn list_blobs_cmd() -> Result<Vec<String>, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-
 #[tauri::command]
 fn save_blob_local_cmd(path: String, dest_dir: String) -> Result<String, String> {
   let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
@@ -51,7 +55,8 @@ fn save_blob_local_cmd(path: String, dest_dir: String) -> Result<String, String>
       .and_then(|n| n.to_str())
       .unwrap_or("file")
       .to_string();
-    save_blob_local(&data, &dest_dir, &filename).map_err(|e| e.to_string())
+    save_blob_local(&data, &dest_dir, &filename).map_err(|e| e.to_string())?;
+    Ok("Fichier sauvegardé avec succès".to_string())
   } else if metadata.is_dir() {
     // Handle directory
     let dir_name = std::path::Path::new(&path)
@@ -85,21 +90,61 @@ fn save_blob_local_cmd(path: String, dest_dir: String) -> Result<String, String>
 
 #[tauri::command]
 async fn open_file_dialog(app: tauri::AppHandle) -> Option<String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_file(move |path| {
-        tx.send(path.map(|p| p.to_string())).unwrap();
-    });
-    rx.recv().unwrap()
+  let (tx, rx) = std::sync::mpsc::channel();
+  app.dialog().file().pick_file(move |path| {
+      tx.send(path.map(|p| p.to_string())).unwrap();
+  });
+  rx.recv().unwrap()
 }
 
 #[tauri::command]
 async fn open_directory_dialog(app: tauri::AppHandle) -> Option<String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_folder(move |path| {
-        tx.send(path.map(|p| p.to_string())).unwrap();
-    });
-    rx.recv().unwrap()
+  let (tx, rx) = std::sync::mpsc::channel();
+  app.dialog().file().pick_folder(move |path| {
+      tx.send(path.map(|p| p.to_string())).unwrap();
+  });
+  rx.recv().unwrap()
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpBackupArgs {
+  host: String,
+  port: u16,
+  username: String,
+  password: String,
+  local_path: String,
+  remote_path: String,
+}
+
+#[tauri::command]
+fn sftp_backup(args: SftpBackupArgs) -> Result<String, String> {
+  log::info!("Tentative de connexion SFTP à {}:{}", args.host, args.port);
+  
+  let client = SftpClient::new(&args.host, args.port, &args.username, &args.password)
+      .map_err(|e| {
+          log::error!("Échec de la connexion SFTP : {}", e);
+          e.to_string()
+      })?;
+  
+  log::info!("Création du répertoire distant : {}", args.remote_path);
+  client.create_directory(&args.remote_path)
+      .map_err(|e| {
+          log::error!("Échec de la création du répertoire : {}", e);
+          e.to_string()
+      })?;
+  
+  log::info!("Upload du fichier {} vers {}", args.local_path, args.remote_path);
+  client.upload_file(Path::new(&args.local_path), &args.remote_path)
+      .map_err(|e| {
+          log::error!("Échec de l'upload du fichier : {}", e);
+          e.to_string()
+      })?;
+  
+  log::info!("Sauvegarde SFTP réussie");
+  Ok("Sauvegarde SFTP réussie".to_string())
+}
+
 pub fn run() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![
@@ -110,7 +155,8 @@ pub fn run() {
       list_blobs_cmd,
       save_blob_local_cmd,
       open_file_dialog,
-      open_directory_dialog
+      open_directory_dialog,
+      sftp_backup
     ])
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_log::Builder::default()
