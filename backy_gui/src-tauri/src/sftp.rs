@@ -1,6 +1,6 @@
-use ssh2::Session;
+use ssh2::{Session, ErrorCode}; // Added ErrorCode
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf}; // Ensure Path and PathBuf are imported
 use std::io::{self, Read, Write};
 use std::time::Duration;
 use std::fs::File;
@@ -107,16 +107,41 @@ impl SftpClient {
     }
 
     pub fn create_directory(&self, path: &str) -> Result<(), SftpError> {
-        let sftp = self.session.sftp().map_err(|e| SftpError::Ssh(e))?;
-        let path_p = Path::new(path);
-        sftp.mkdir(path_p, 0o755).map_err(|e| {
-            SftpError::Operation(format!(
-                "Failed to create remote directory '{}': {}",
-                path_p.display(),
-                e
-            ))
-        })?;
-        Ok(())
+        let sftp = self.session.sftp().map_err(SftpError::Ssh)?;
+        let target_path = Path::new(path);
+
+        match sftp.mkdir(target_path, 0o755) {
+            Ok(()) => Ok(()), // Successfully created
+            Err(e) => {
+                // Check primary error code for FX_FILE_ALREADY_EXISTS
+                if e.code() == Some(ErrorCode::SFTP(4)) { // FX_FILE_ALREADY_EXISTS
+                    // If server correctly reports FX_FILE_ALREADY_EXISTS,
+                    // we might still want to stat to ensure it's a directory,
+                    // as another client could have created a file with the same name.
+                    match sftp.stat(target_path) {
+                        Ok(stat) if stat.is_dir() => Ok(()),
+                        Ok(_) => Err(SftpError::Operation(format!(
+                            "Path '{}' exists but is not a directory.",
+                            target_path.display()
+                        ))),
+                        Err(stat_err) => Err(SftpError::Operation(format!(
+                            "Directory '{}' may already exist but failed to confirm: (mkdir error: {}, stat error: {})",
+                            target_path.display(), e, stat_err
+                        ))),
+                    }
+                } else {
+                    // If not FX_FILE_ALREADY_EXISTS, try statting anyway as a fallback,
+                    // some servers might return a generic FX_FAILURE.
+                    match sftp.stat(target_path) {
+                        Ok(stat) if stat.is_dir() => Ok(()), // It exists and is a directory.
+                        _ => Err(SftpError::Operation(format!( // Covers stat failed or not a dir
+                            "Failed to create remote directory '{}': (mkdir error: {}). Stat check also failed or path is not a directory.",
+                            target_path.display(), e
+                        ))),
+                    }
+                }
+            }
+        }
     }
 
     pub fn list_directory(&self, remote_path: &str) -> Result<Vec<String>, SftpError> {
@@ -131,7 +156,7 @@ impl SftpClient {
 
         let filenames = entries
             .into_iter()
-            .map(|(entry_path, _stat): (PathBuf, ssh2::FileStat)| {
+            .map(|(entry_path, _stat): (PathBuf, ssh2::FileStat)| { // Ensure explicit typing
                 entry_path
                     .file_name()
                     .unwrap_or_default() // Use OsStr::new("") if file_name is None

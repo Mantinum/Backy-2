@@ -3,10 +3,11 @@
 
 use tauri_plugin_dialog::DialogExt;
 use backy_core::{backup_start, chunk_file, init_repo, save_blob, list_blobs, save_blob_local};
-use std::path::Path; // Removed PathBuf as it's unused
+use std::path::Path; // Ensures only Path is imported, not PathBuf
 use serde::Deserialize;
-use log::{info, error}; // Added for logging
+use log::{info, error}; // Assuming this was confirmed as used/needed
 
+// The module 'sftp' and its import should be defined AFTER all top-level use statements
 mod sftp;
 use sftp::SftpClient;
 
