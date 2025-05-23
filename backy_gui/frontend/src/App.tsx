@@ -1,48 +1,72 @@
 import { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/tauri';
 import './App.css';
 
+/**
+ * Backy-2 Frontend – main React component.
+ * Typé strict ; interfaces utilisées pour éviter les avertissements TS.
+ */
 function App() {
+  /* ======== State ======== */
   const [source, setSource] = useState<string>('');
   const [dest, setDest] = useState<string>('');
   const [output, setOutput] = useState<string>('');
   const [chunkCount, setChunkCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
-  const [sftpHost, setSftpHost] = useState<string>('');
-  const [sftpPort, setSftpPort] = useState<number>(22);
-  const [sftpUsername, setSftpUsername] = useState<string>('');
-  const [sftpPassword, setSftpPassword] = useState<string>('');
-  const [sftpRemotePath, setSftpRemotePath] = useState<string>('');
 
-  // Local backup using native command
+  const [loading, setLoading]     = useState<boolean>(false);
+  const [progress, setProgress]   = useState<number>(0);
+
+  /* SFTP form fields */
+  const [sftpHost,        setSftpHost]        = useState<string>('');
+  const [sftpPort,        setSftpPort]        = useState<number>(22);
+  const [sftpUsername,    setSftpUsername]    = useState<string>('');
+  const [sftpPassword,    setSftpPassword]    = useState<string>('');
+  const [sftpRemotePath,  setSftpRemotePath]  = useState<string>('');
+
+  /* ======== Types ======== */
+  interface SaveBlobLocalArgs {
+    path: string;
+    destDir: string;
+  }
+
+  interface SftpBackupArgs {
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+    localPath: string;
+    remotePath: string;
+  }
+
+  /* ======== Helpers ======== */
+  const fakeProgress = () => {
+    setProgress(0);
+    const id = setInterval(() => {
+      setProgress(prev => {
+        const nxt = prev + 5;
+        if (nxt >= 100) {
+          clearInterval(id);
+          return 100;
+        }
+        return nxt;
+      });
+    }, 150);
+  };
+
+  /* ======== Actions ======== */
   const handleLocalBackup = async () => {
-      if (!source || !dest) {
-        setOutput('Veuillez spécifier un chemin source et un répertoire de sauvegarde locale.');
+    if (!source || !dest) {
+      setOutput('Veuillez spécifier un chemin source ET une destination locale.');
       return;
     }
     setLoading(true);
     setOutput('');
-    setProgress(0);
+    fakeProgress();
+
+    const args: SaveBlobLocalArgs = { path: source, destDir: dest };
+
     try {
-      interface SaveBlobLocalArgs extends Record<string, unknown> {
-        path: string;
-        destDir: string;
-      }
-
-      const args: SaveBlobLocalArgs = {
-        path: source,
-        destDir: dest
-      };
-      
-      // Simulate progress (replace with actual progress updates)
-      const interval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-      }, 300);
-
-      const res: string = await invoke('save_blob_local_cmd', args);
-      clearInterval(interval);
-      setProgress(100);
+      const res: string = await invoke('save_blob_local', { args });
       setOutput(`Sauvegarde locale réussie : ${res}`);
     } catch (err) {
       setOutput(`Erreur : ${String(err)}`);
@@ -53,38 +77,31 @@ function App() {
 
   const handleSftpBackup = async () => {
     if (!source) {
-      setOutput('Veuillez spécifier un fichier ou dossier source');
+      setOutput('Veuillez sélectionner un fichier ou dossier source.');
       return;
     }
     if (!sftpHost || !sftpUsername || !sftpPassword || !sftpRemotePath) {
-      setOutput('Veuillez remplir tous les champs de configuration SFTP');
+      setOutput('Veuillez remplir tous les champs SFTP.');
       return;
     }
     setLoading(true);
     setOutput('');
-    try {
-      interface SftpBackupArgs extends Record<string, unknown> {
-        host: string;
-        port: number;
-        username: string;
-        password: string;
-        localPath: string;
-        remotePath: string;
-      }
+    fakeProgress();
 
-      const result = await invoke('sftp_backup', {
-  args: { // <--- Les paramètres sont maintenant sous la clé 'args'
-    host: sftpHost,
-    port: parseInt(sftpPort), // Assurez-vous que sftpPort est converti en nombre
-    username: sftpUsername,
-    password: sftpPassword,
-    localPath: source,        // 'source' est utilisé ici pour localPath
-    remotePath: sftpRemotePath
-  }
-});
-      setOutput(String(result));
+    const sftpArgs: SftpBackupArgs = {
+      host: sftpHost,
+      port: sftpPort,
+      username: sftpUsername,
+      password: sftpPassword,
+      localPath: source,
+      remotePath: sftpRemotePath,
+    };
+
+    try {
+      const res = await invoke('sftp_backup', { args: sftpArgs });
+      setOutput(String(res));
     } catch (err) {
-      setOutput(String(err));
+      setOutput(`Erreur : ${String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -92,199 +109,109 @@ function App() {
 
   const handleChunk = async () => {
     if (!source) {
-      setOutput('Veuillez spécifier un chemin de fichier pour le découpage.');
+      setOutput('Veuillez spécifier un fichier à découper.');
       return;
     }
     setLoading(true);
     setOutput('');
-    setChunkCount(null);
+    fakeProgress();
+
     try {
-      const count: number = await invoke('chunk_file_cmd', { path: source });
-      setChunkCount(count);
+      const cnt: number = await invoke('chunk_file_cmd', { path: source });
+      setChunkCount(cnt);
+      setOutput(`${cnt} morceaux créés.`);
     } catch (err) {
-      setOutput(String(err));
+      setOutput(`Erreur : ${String(err)}`);
     } finally {
       setLoading(false);
     }
   };
 
+  /* ======== UI ======== */
   return (
     <div className="container">
-      <h1>Backy 2.0</h1>
-
-      {/* Source Section */}
-      <div className="section" style={{ backgroundColor: 'var(--section-source)' }}>
-        <label>Chemin du fichier ou dossier</label>
+      {/* Source selector */}
+      <section className="section">
+        <label>Chemin source</label>
         <div className="input-group">
           <input
-            type="text"
+            className="input"
             value={source}
             onChange={(e) => setSource(e.currentTarget.value)}
-            className="input"
-            placeholder="Sélectionnez un fichier ou dossier"
-          />
-          <div className="button-group">
-            <button
-              onClick={async () => {
-                const selected = await invoke('open_file_dialog');
-                if (selected) {
-                  setSource(selected as string);
-                }
-              }}
-              className="button"
-            >
-              Fichier
-            </button>
-            <button
-              onClick={async () => {
-                const selected = await invoke('open_directory_dialog');
-                if (selected) {
-                  setSource(selected as string);
-                }
-              }}
-              className="button"
-            >
-              Dossier
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Destination Section */}
-      <div className="section" style={{ backgroundColor: 'var(--section-dest)' }}>
-        <label>Répertoire de sauvegarde locale</label>
-        <div className="input-group">
-          <input
-            type="text"
-            value={dest}
-            onChange={(e) => setDest(e.currentTarget.value)}
-            className="input"
-            placeholder="Sélectionnez un répertoire de destination"
+            placeholder="Choisir fichier ou dossier…"
           />
           <button
-            onClick={async () => {
-              const selected = await invoke('open_directory_dialog');
-              if (selected) {
-                setDest(selected as string);
-              }
-            }}
             className="button"
+            onClick={async () => {
+              const selected = await invoke<string | null>('open_file_dialog');
+              if (selected) setSource(selected);
+            }}
           >
             Parcourir
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* Progress Bar */}
+      {/* Destination selector */}
+      <section className="section">
+        <label>Dossier cible (sauvegarde locale)</label>
+        <div className="input-group">
+          <input
+            className="input"
+            value={dest}
+            onChange={(e) => setDest(e.currentTarget.value)}
+            placeholder="/chemin/vers/destination" />
+          <button
+            className="button"
+            onClick={async () => {
+              const selected = await invoke<string | null>('open_directory_dialog');
+              if (selected) setDest(selected);
+            }}
+          >
+            Parcourir
+          </button>
+        </div>
+      </section>
+
+      {/* SFTP configuration */}
+      <section className="section">
+        <h3>SFTP</h3>
+        <div className="input-group">
+          <input className="input" placeholder="Hôte" value={sftpHost} onChange={(e)=>setSftpHost(e.target.value)} />
+          <input className="input" type="number" placeholder="Port" value={sftpPort} onChange={(e)=>setSftpPort(Number(e.target.value))} />
+        </div>
+        <div className="input-group">
+          <input className="input" placeholder="Utilisateur" value={sftpUsername} onChange={(e)=>setSftpUsername(e.target.value)} />
+          <input className="input" type="password" placeholder="Mot de passe" value={sftpPassword} onChange={(e)=>setSftpPassword(e.target.value)} />
+        </div>
+        <input className="input" placeholder="Chemin distant" value={sftpRemotePath} onChange={(e)=>setSftpRemotePath(e.target.value)} />
+      </section>
+
+      {/* Progress bar */}
       {loading && (
-        <div className="section" style={{ backgroundColor: 'var(--section-actions)' }}>
-          <div className="progress-bar">
-            <div
-              className="progress"
-              style={{ width: `${progress}%` }}
-            ></div>
-          </div>
-        </div>
+        <section className="section">
+          <div className="progress-bar" style={{ width: `${progress}%` }} />
+        </section>
       )}
 
-      {/* SFTP Configuration Section */}
-      <div className="section" style={{ backgroundColor: 'var(--section-actions)' }}>
-        <h2>Configuration SFTP</h2>
-        <div className="input-group">
-          <input
-            type="text"
-            placeholder="Hôte"
-            value={sftpHost}
-            onChange={(e) => setSftpHost(e.target.value)}
-            className="input"
-          />
-          <input
-            type="number"
-            placeholder="Port"
-            value={sftpPort}
-            onChange={(e) => setSftpPort(Number(e.target.value))}
-            className="input"
-          />
-        </div>
-        <div className="input-group">
-          <input
-            type="text"
-            placeholder="Nom d'utilisateur"
-            value={sftpUsername}
-            onChange={(e) => setSftpUsername(e.target.value)}
-            className="input"
-          />
-          <input
-            type="password"
-            placeholder="Mot de passe"
-            value={sftpPassword}
-            onChange={(e) => setSftpPassword(e.target.value)}
-            className="input"
-          />
-        </div>
-        <div className="input-group">
-          <input
-            type="text"
-            placeholder="Chemin distant"
-            value={sftpRemotePath}
-            onChange={(e) => setSftpRemotePath(e.target.value)}
-            className="input"
-          />
-        </div>
-      </div>
+      {/* Action buttons */}
+      <section className="section actions">
+        <button className="button" disabled={loading} onClick={handleLocalBackup}>
+          Sauvegarde locale
+        </button>
+        <button className="button" disabled={loading} onClick={handleSftpBackup}>
+          Sauvegarde SFTP
+        </button>
+        <button className="button" disabled={loading} onClick={handleChunk}>
+          Découper en blocs
+        </button>
+      </section>
 
-      {/* Actions Section */}
-      <div className="section" style={{ backgroundColor: 'var(--section-actions)' }}>
-        <div className="button-group">
-          <button
-            onClick={handleLocalBackup}
-            disabled={loading}
-            className="button"
-          >
-            {loading ? (
-              <span className="loading">⏳</span>
-            ) : (
-              'Sauvegarde locale'
-            )}
-          </button>
-          <button
-            onClick={handleSftpBackup}
-            disabled={loading}
-            className="button"
-          >
-            {loading ? (
-              <span className="loading">⏳</span>
-            ) : (
-              'Sauvegarde SFTP'
-            )}
-          </button>
-          <button
-            onClick={handleChunk}
-            disabled={loading}
-            className="button"
-          >
-            {loading ? (
-              <span className="loading">⏳</span>
-            ) : (
-              'Nombre de chunks'
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Output Section */}
-      {output && (
-        <div className="section output" style={{ backgroundColor: 'var(--section-output)' }}>
-          <pre>{output}</pre>
-        </div>
-      )}
-
-      {/* Chunk Count Section */}
-      {chunkCount !== null && (
-        <div className="section output">
-          <p>Nombre de chunks : {chunkCount}</p>
-        </div>
-      )}
+      {/* Output */}
+      <section className="section output">
+        {chunkCount !== null && <p>{chunkCount} morceaux générés.</p>}
+        {output && <pre className="terminal">{output}</pre>}
+      </section>
     </div>
   );
 }
