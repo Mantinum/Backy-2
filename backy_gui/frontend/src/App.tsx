@@ -73,13 +73,15 @@ function App() {
       }
 
       const result = await invoke('sftp_backup', {
-          host: sftpHost,
-          port: sftpPort,
-          username: sftpUsername,
-          password: sftpPassword,
-          localPath: source,
-          remotePath: sftpRemotePath
-        });
+  args: { // <--- Les paramètres sont maintenant sous la clé 'args'
+    host: sftpHost,
+    port: parseInt(sftpPort), // Assurez-vous que sftpPort est converti en nombre
+    username: sftpUsername,
+    password: sftpPassword,
+    localPath: source,        // 'source' est utilisé ici pour localPath
+    remotePath: sftpRemotePath
+  }
+});
       setOutput(String(result));
     } catch (err) {
       setOutput(String(err));
